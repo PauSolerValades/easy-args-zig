@@ -39,5 +39,6 @@ Luckily, I've managed to ensemble a working prototype real fast! This can be nic
 [x] Default values: where do I store them in comptime? i need to do some research arround that (`default_value_ptr`)
 [x] New Parser: first fill the Arg normals, and then search for `-s` or `--string` for the flags and the OptArg
 [x] ValueParser: make it parse all the types appropiately, using std
-[] show help when argument is help 
-[ ] 
+[x] show help when argument is help 
+[x] handle reserved help 
+[ ] submenus support (that shit crazy)

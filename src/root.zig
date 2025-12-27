@@ -19,7 +19,16 @@ pub fn parseArgs(allocator: Allocator, comptime args_def: anytype, stdout: *Io.W
     arg_struct.validateDefinition(args_def);
     const ResultType = ArgsStruct(args_def);
     var result: ResultType = undefined;
+    
+    // options must be initialized to default value
+    inline for (args_def.optional) |opt| {
+        @field(result, opt.field_name) = opt.default_value;
+    }
 
+    // all flags to false by default 
+    inline for (args_def.flags) |flg| {
+        @field(result, flg.field_name) = false;
+    }
     var args_iter = try std.process.argsWithAllocator(allocator);
     defer args_iter.deinit();
 

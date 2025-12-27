@@ -17,42 +17,53 @@ pub fn main() !void {
     const definitions = .{
         .required = .{
             eaz.Arg(u32, "limit", "Limits are meant to be broken"),
-            eaz.Arg(bool, "verbose", "print a little, or print a lot"),
             eaz.Arg([]const u8, "username", "who are you dear?"),
         },
         .optional = .{
             eaz.OptArg(u32, "break", "b", 100, "Stop before the limit"),
         },
-        .flags = .{eaz.Flag("hello", "he", "Print a little, print a lot but now with a flag"),},
+        .flags = .{eaz.Flag("verbose", "v", "Print a little, print a lot"),},
     };
 
-    const config = eaz.parseArgs(allocator, definitions, stdout, stderr) catch |err| {
-        std.debug.print("Failed to parse args: {any}\n", .{err});
-        return;
+    const arguments = eaz.parseArgs(allocator, definitions, stdout, stderr) catch |err| {
+        switch (err) {
+            error.HelpShown => {
+                try stdout.flush();
+                std.process.exit(0);
+            },
+            else => {
+                try stderr.flush();
+                std.process.exit(1);
+            }
+        }    
     };
     
     // ------- Proofs of this thing is actually working you know
     // it's actually a new struct type
-    const T = @TypeOf(config);
-    std.debug.print("\n--- Who is this struct? ---\n", .{});
-    std.debug.print("Type Name: {s}\n", .{@typeName(T)});
+    const T = @TypeOf(arguments);
+    try stdout.print("\n EazyArgs has created a whole new struct with the provided definition.\n", .{});
+    try stdout.print("Type Name: {s}\n", .{@typeName(T)});
     
-    // proof of memory layout
-    std.debug.print("Size: {d} bytes\n", .{@sizeOf(T)});
-    std.debug.print("Limit offset: {d}\n", .{@offsetOf(T, "limit")});
-    std.debug.print("Verbose offset: {d}\n", .{@offsetOf(T, "verbose")});
+    try stdout.print("Let's check the alignment and bytes to make sure:\n", .{});
+    try stdout.print("Size of definition generated struct: {d} bytes\n", .{@sizeOf(T)});
+    try stdout.print("Limit offset: {d}\n", .{@offsetOf(T, "limit")});
+    try stdout.print("Username offset: {d}\n", .{@offsetOf(T, "username")});
+    try stdout.print("Break offset: {d}\n", .{@offsetOf(T, "break")});
+    try stdout.print("Verbose offset: {d}\n", .{@offsetOf(T, "verbose")});
     
     // proof of names actually being in there
     const typeInfo = @typeInfo(T);
-    std.debug.print("\n--- Field Inspection ---\n", .{});
+    try stdout.print("\n You can loop over all the fields, which whill be the same as in definition \n", .{});
     inline for (typeInfo.@"struct".fields) |f| {
-       std.debug.print("Field '{s}' is type: {s}\n", .{ f.name, @typeName(f.type) });
+       try stdout.print("Field '{s}' is type: {s}\n", .{ f.name, @typeName(f.type) });
     }
 
     // struct access
-    std.debug.print("\n--- Result ---\n", .{});
-    std.debug.print("Limit:    {d}\n", .{config.limit});
-    std.debug.print("Verbose:  {any}\n", .{config.verbose});
-    std.debug.print("Username: {s}\n", .{config.username});
+    try stdout.print("\n Lastly, the values are indeed the provided ones in the terminal\n", .{});
+    try stdout.print("Limit:    {d}\n", .{arguments.limit});
+    try stdout.print("Username: {s}\n", .{arguments.username});
+    try stdout.print("Break: {d}\n", .{arguments.@"break"});
+    try stdout.print("Verbose:  {any}\n", .{arguments.verbose});
+    try stdout.flush();
 }
 
