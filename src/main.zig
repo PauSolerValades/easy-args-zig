@@ -33,13 +33,13 @@ pub fn main() !void {
         switch (err) {
             error.HelpShown => {
                 try stdout.flush();
-                std.process.exit(0);
             },
             else => {
                 try stderr.flush();
-                std.process.exit(0);
             }
         }    
+
+        std.process.exit(0);
     };
     
     // ------- Proofs of this thing is actually working you know
