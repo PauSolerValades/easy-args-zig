@@ -1,5 +1,5 @@
 const std = @import("std");
-const eaz = @import("easy_args_zig");
+const eaz = @import("eazy_args");
 
 const Arg = eaz.Arg;
 const OptArg = eaz.OptArg;
