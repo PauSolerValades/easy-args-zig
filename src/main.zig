@@ -1,23 +1,14 @@
 const std = @import("std");
+const Io = std.Io;
+const Allocator = std.mem.Allocator;
+
 const eaz = @import("eazy_args");
 
 const Arg = eaz.Arg;
 const OptArg = eaz.OptArg;
 const Flag = eaz.Flag;
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-    
-    var buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&buffer);
-    const stdout = &stdout_writer.interface;
-
-    var buferr: [1024]u8 = undefined;
-    var stderr_writer = std.fs.File.stdout().writer(&buferr);
-    const stderr = &stderr_writer.interface;
-    
+fn example1(allocator: Allocator, stdout: *Io.Writer, stderr: *Io.Writer) !void {
     const definitions = .{
         .required = .{
             Arg(u32, "limit", "Limits are meant to be broken"),
@@ -27,6 +18,7 @@ pub fn main() !void {
             OptArg(u32, "break", "b", 100, "Stop before the limit"),
         },
         .flags = .{Flag("verbose", "v", "Print a little, print a lot"),},
+        .commands = .{},
     };
 
     const arguments = eaz.parseArgs(allocator, definitions, stdout, stderr) catch |err| {
@@ -69,5 +61,57 @@ pub fn main() !void {
     try stdout.print("Break: {d}\n", .{arguments.@"break"});
     try stdout.print("Verbose:  {any}\n", .{arguments.verbose});
     try stdout.flush();
+
+}
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    
+    var buffer: [1024]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&buffer);
+    const stdout = &stdout_writer.interface;
+
+    var buferr: [1024]u8 = undefined;
+    var stderr_writer = std.fs.File.stdout().writer(&buferr);
+    const stderr = &stderr_writer.interface;
+    
+    // example1(stdout, stderr);
+    
+    const definition = .{
+        .commands = .{
+            .entry = .{ 
+                .required = .{ Arg([]const u8, "description", "What are you doing") },
+                .optional = .{ OptArg(?usize, "project", "p", null, "Which project does the entry belong")},
+                .flags = .{},
+                .commands = .{},
+            },
+            .project = .{ 
+                .required = .{ Arg([]const u8, "Name", "Which project is this") },
+                .optional = .{ OptArg(?usize, "subproject", "sp", null, "Child of subprojectid") },
+                .flags = .{},
+                .commands = .{},
+            },
+        },
+        .required = .{},
+        .optional = .{},
+        .flags = .{},
+    };
+
+    //const arguments = try eaz.parseArgs(allocator, definition, stdout, stderr);
+    const arguments = eaz.parseArgs(allocator, definition, stdout, stderr) catch |err| {
+        switch (err) {
+            error.HelpShown => try stdout.flush(),
+            error.UnexpectedArgument => {try stderr.print("Error"); try stderr.flush(); },
+            else => try stderr.flush(),
+        }    
+
+        std.process.exit(0);
+    };
+
+    try stdout.print("{any}\n", .{arguments});
+
+
 }
 

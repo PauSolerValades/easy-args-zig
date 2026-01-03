@@ -28,7 +28,9 @@ pub fn parseArgs(allocator: Allocator, comptime args_def: anytype, stdout: *Io.W
     var args_iter = try std.process.argsWithAllocator(allocator);
     defer args_iter.deinit();
 
-    _ = args_iter.skip(); 
+    _ = args_iter.skip();
+
+    if ()
 
     inline for (args_def.required, 0..) |req_def, i| {
         

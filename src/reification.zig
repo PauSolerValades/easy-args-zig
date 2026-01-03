@@ -57,22 +57,17 @@ pub fn Flag(comptime name: [:0]const u8, comptime short: [:0]const u8, comptime 
 /// This struct has been validated by the another part
 pub fn ArgsStruct(comptime definition: anytype) type {
     
-    // const len_cmd = definition.comands.len;
-    //
-    // var nested_def: ?type = null;
-    // if (len_cmd != 0) {
-    //     // for element in comands: // hem de tenir un struct per a cada mètode, ja que hem de fer la unió
-    //     //  nested_def = ArgsStruct(element);
-    //     //
-    //     // create union, plug that into the struct
-    //     nested_def = ArgsStruct(definition);
-    // }
-
     const len_req = definition.required.len;
     const len_opt = definition.optional.len;
     const len_flg = definition.flags.len;
+    const fixed_len = len_req + len_opt + len_flg;
 
-    const len = len_req + len_opt + len_flg;
+    const Cmd: type = @TypeOf(definition.commands);
+    const len_cmd = @typeInfo(Cmd).@"struct".fields.len;
+
+    const are_commands = if (len_cmd > 0) 1 else 0;
+
+    const len = fixed_len + are_commands;
     
     var names: [len][]const u8 = undefined;
     var types: [len]type = undefined;
@@ -123,10 +118,47 @@ pub fn ArgsStruct(comptime definition: anytype) type {
         };
         i += 1;
     }
-
+    
+    if (len_cmd > 0) {
+        const CommandUnion = GenerateCommandUnion(definition.commands);
+        
+        names[i] = "cmd"; 
+        types[i] = CommandUnion;
+        
+        attrs[i] = .{
+            .default_value_ptr = null,
+            .@"comptime" = false,
+            .@"align" = null,
+        };
+        i += 1;
+    }
+    
     return @Struct(.auto, null, &names, &types, &attrs);
 }
 
 
+fn GenerateCommandUnion(comptime commands_def: anytype) type {
+    const Cmd: type = @TypeOf(commands_def);
+    const fields_info = @typeInfo(Cmd).@"struct".fields;
+    const len = fields_info.len;
 
+    const CurrentCommandsEnum = std.meta.FieldEnum(Cmd);
+    
+    var names: [len][]const u8 = undefined;
+    var types: [len]type = undefined;
+    var attrs: [len]Type.UnionField.Attributes = undefined;
+    
+    inline for (fields_info, 0..) |field, i| {
+        names[i] = field.name;
+
+        const cmd_def = @field(commands_def, field.name);
+        const CmdStruct = ArgsStruct(cmd_def); 
+
+        types[i] = CmdStruct;
+
+        attrs[i] = .{ .@"align" = @alignOf(CmdStruct) };
+    }
+
+    return @Union(.auto, CurrentCommandsEnum, &names, &types, &attrs);
+}
 
