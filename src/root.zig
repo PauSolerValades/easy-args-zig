@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+const Args = std.process.Args;
 
 const reification = @import("reification.zig");
 const validation = @import("validation.zig");
@@ -11,8 +12,13 @@ pub const Arg = reification.Arg;
 pub const OptArg = reification.OptArg;
 pub const Flag = reification.Flag;
 
-pub fn parseArgs(allocator: Allocator, comptime args_def: anytype, stdout: *Io.Writer, stderr: *Io.Writer) !ArgsStruct(args_def) {
+pub const ParseErrors = error { HelpShown, MissingArgument, MissingValue, UnknownArgument, UnexpectedArgument };
+
+// ULL aquí he posat anyerror mentre no reescric la funció per anar amb commands i que hi puguin haver-hi llistes buides :)
+pub fn parseArgs(allocator: Allocator, comptime args_def: anytype, args_iter: *Args.Iterator, stdout: *Io.Writer, stderr: *Io.Writer) anyerror!ArgsStruct(args_def) {
+    _ = allocator;
     validation.validateDefinition(args_def);
+    
     const ResultType = ArgsStruct(args_def);
     var result: ResultType = undefined;
     
@@ -25,15 +31,9 @@ pub fn parseArgs(allocator: Allocator, comptime args_def: anytype, stdout: *Io.W
     inline for (args_def.flags) |flg| {
         @field(result, flg.field_name) = false;
     }
-    var args_iter = try std.process.argsWithAllocator(allocator);
-    defer args_iter.deinit();
-
-    _ = args_iter.skip();
-
-    if ()
-
+    
     inline for (args_def.required, 0..) |req_def, i| {
-        
+       
         const arg_str = args_iter.next() orelse {
             try stderr.print("Error: Missing argument '{s}'\n", .{req_def.field_name});
             try printUsage(args_def, stderr);
@@ -181,6 +181,7 @@ fn printUsage(comptime args_def: anytype, writer: *Io.Writer) !void {
 const talloc = std.testing.allocator;
 const expect = std.testing.expect;
 const expectEqualStrings = std.testing.expectEqualStrings;
+
 
 test "parseValue successful" {
     const p1 = try parseValue(u32, "16");
