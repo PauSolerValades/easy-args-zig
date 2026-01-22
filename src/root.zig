@@ -14,8 +14,28 @@ pub const Flag = reification.Flag;
 
 pub const ParseErrors = error { HelpShown, MissingArgument, MissingValue, UnknownArgument, UnexpectedArgument };
 
+pub fn parseArgs(comptime args_def: anytype, args_iter: *Args.Iterator, stdout: *Io.Writer, strderr: *Io.Writer) !ArgsStruct(args_def){
+    
+    // this will throw a compile error if not valid
+    validation.validateDefinition(args_def);
+
+    // create the reificated type 
+    const ResultType = ArgsStruct(args_def);
+    // 1. Check if ResultType has a cmd with typeInfo(ResultType).@"struct".fileds { if f.name == cmd}
+    // 2. That is going to be a Union, use the below line to get the enums
+    //
+    const cmd_enum = std.meta.Tag(ResultType.cmd)
+    // 3. use std.meta.stringToEnum(UnionTagType, current_arg) to check!
+    // Rule 1: every subcommands must be at the beginning.
+    while(true) {
+        const current_arg = args_iter.next();
+        
+    }
+
+
+}
 // ULL aquí he posat anyerror mentre no reescric la funció per anar amb commands i que hi puguin haver-hi llistes buides :)
-pub fn parseArgs(allocator: Allocator, comptime args_def: anytype, args_iter: *Args.Iterator, stdout: *Io.Writer, stderr: *Io.Writer) anyerror!ArgsStruct(args_def) {
+pub fn old_parseArgs(allocator: Allocator, comptime args_def: anytype, args_iter: *Args.Iterator, stdout: *Io.Writer, stderr: *Io.Writer) anyerror!ArgsStruct(args_def) {
     _ = allocator;
     validation.validateDefinition(args_def);
     

@@ -30,7 +30,7 @@ pub fn main() !void {
     
     
     const Result: type = reification.ArgsStruct(definition);
-
+    
     std.debug.print("{any}\n", .{Result});
     const typeInfo = @typeInfo(Result);
     
@@ -39,7 +39,11 @@ pub fn main() !void {
     
     inline for (typeInfo.@"struct".fields) |f| {
         std.debug.print(" - Name: '{s}', Type: {s}\n", .{f.name, @typeName(f.type)});
+        std.debug.print("{any}\n", .{@typeInfo(f.type).@"union".fields});
+
     }
+
+    
 }
 
 
