@@ -60,17 +60,16 @@ pub fn Flag(comptime name: [:0]const u8, comptime short: [:0]const u8, comptime 
 /// This struct has been validated by the another part
 pub fn ArgsStruct(comptime definition: anytype) type {
     
-    const len_req = definition.required.len;
-    const len_opt = definition.optional.len;
-    const len_flg = definition.flags.len;
-    const fixed_len = len_req + len_opt + len_flg;
-
-    const Cmd: type = @TypeOf(definition.commands);
-    const len_cmd = @typeInfo(Cmd).@"struct".fields.len;
-
+    const definition_type = @TypeOf(definition);
+    const len_req = if (@hasField(definition_type, "required")) definition.required.len else 0;
+    const len_opt = if (@hasField(definition_type, "optional")) definition.optional.len else 0;
+    const len_flg = if (@hasField(definition_type, "flags")) definition.flags.len else 0;
+    const arg_len = len_req + len_opt + len_flg;
+   
+    const len_cmd = if (@hasField(definition_type, "commands")) @typeInfo(@TypeOf(definition.commands)).@"struct".fields.len else 0;
     const are_commands = if (len_cmd > 0) 1 else 0;
-
-    const len = fixed_len + are_commands;
+        
+    const len = arg_len + are_commands;
     
     var names: [len][]const u8 = undefined;
     var types: [len]type = undefined;
@@ -78,54 +77,63 @@ pub fn ArgsStruct(comptime definition: anytype) type {
     
     // fill required args, they are the first ones
     var i: usize = 0;
-    inline for (definition.required) |arg| {
-        names[i] = arg.field_name;
-        types[i] = arg.type_id;
-        
-        attrs[i] = .{
-            .default_value_ptr = null,  // no default value 
-            .@"comptime" = false,       // save it when compiled (user will be able to use it) 
-            .@"align" = null,           // natural alignment
-        };
-        i += 1;
-    }
-
-    // fill optional arguments
-    inline for (definition.optional) |arg| {
-        names[i] = arg.field_name;
-        types[i] = arg.type_id;
-        
-        // we point to the default value
-        const ptr: *const anyopaque = @ptrCast(&arg.default_value);
-        attrs[i] = .{
-            .default_value_ptr = ptr,   // pick the provided default :)
-            .@"comptime" = false,       // save it when compiled (user will be able to use it) 
-            .@"align" = null,           // natural alignment
-        };
-        i += 1;
+    if (len_req > 0) {
+        inline for (definition.required) |arg| {
+            names[i] = arg.field_name;
+            types[i] = arg.type_id;
+            
+            attrs[i] = .{
+                .default_value_ptr = null,  // no default value 
+                .@"comptime" = false,       // save it when compiled (user will be able to use it) 
+                .@"align" = null,           // natural alignment
+            };
+            i += 1;
+        }
     }
     
-    // fill flags
-    inline for (definition.flags) |arg| {
-        names[i] = arg.field_name;
-        types[i] = bool;
-        
-        // Flags default to false
-        const false_val = false; 
-        const ptr: *const anyopaque = @ptrCast(&false_val);
 
-        attrs[i] = .{ 
-            .@"comptime" = false,        
-            .@"align" = null,           // nartural alignment
-            .default_value_ptr = ptr    // a pointer to a false
-        };
-        i += 1;
+    // fill optional arguments
+    if (len_opt > 0) {
+        inline for (definition.optional) |arg| {
+            names[i] = arg.field_name;
+            types[i] = arg.type_id;
+            
+            // we point to the default value
+            const ptr: *const anyopaque = @ptrCast(&arg.default_value);
+            attrs[i] = .{
+                .default_value_ptr = ptr,   // pick the provided default :)
+                .@"comptime" = false,       // save it when compiled (user will be able to use it) 
+                .@"align" = null,           // natural alignment
+            };
+            i += 1;
+        }
+    } 
+    
+    
+    // fill flags
+    if (len_flg > 0) {
+        inline for (definition.flags) |arg| {
+            names[i] = arg.field_name;
+            types[i] = bool;
+            
+            // Flags default to false
+            const false_val = false; 
+            const ptr: *const anyopaque = @ptrCast(&false_val);
+
+            attrs[i] = .{ 
+                .@"comptime" = false,        
+                .@"align" = null,           // nartural alignment
+                .default_value_ptr = ptr    // a pointer to a false
+            };
+            i += 1;
+        }
     }
+    
     
     if (len_cmd > 0) {
         const CommandUnion = GenerateCommandUnion(definition.commands);
         
-        names[i] = "cmd"; 
+        names[i] = "command"; 
         types[i] = CommandUnion;
         
         attrs[i] = .{

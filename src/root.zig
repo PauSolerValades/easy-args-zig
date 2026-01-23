@@ -23,27 +23,46 @@ pub fn parseArgs(comptime args_def: anytype, args_iter: *Args.Iterator, stdout: 
     validation.validateDefinition(args_def);
 
     // create the reificated type 
-    const ResultType = ArgsStruct(args_def);
-    // 1. Check if ResultType has a cmd with typeInfo(ResultType).@"struct".fileds { if f.name == cmd}
-    // 2. That is going to be a Union, use the below line to get the enums
-    const UnionTag = std.meta.Tag(ResultType.cmd);
-    // 3. use std.meta.stringToEnum(UnionTagType, current_arg) to check!
+    const ReArgs: type = ArgsStruct(args_def);
     
-    // Rule 1: every subcommands must be at the beginning.
-    while(true) {
-        const current_arg = args_iter.next();
+    if (@hasField(ReArgs, "command")) {
         
-        if (std.meta.stringToEnum(UnionTag, current_arg)) {
-            // és una commanda!
-            std.debug.print("Això és una commands\n", .{});
-        } else {
-            std.debug.print("Això no és una commanda", .{});
+        // get the type of the command field
+        // we ask Zig for the type info of our struct, get the fields, and search for "command"
+        const CommandUnion = comptime find_cmd: {
+            const fields = @typeInfo(ReArgs).@"struct".fields;
+            for (fields) |f| {
+                if (std.mem.eql(u8, f.name, "command")) {
+                    break :find_cmd f.type;
+                }
+            }
+            unreachable;
+        };
+
+        // get the Enum tags from that Union type
+        const CommandTag = std.meta.Tag(CommandUnion);
+
+        // runtime parsing loop
+        // args_iter.next() returns ?[]const u8 (Optional), so we capture it with |arg|
+        while (args_iter.next()) |current_arg| {
+            
+            // stringToEnum returns an optional enum (e.g., .project or null).
+            // We capture it with |_| just to verify it's not null.
+            if (std.meta.stringToEnum(CommandTag, current_arg)) |_| {
+                std.debug.print("Això és una commanda: {s}\n", .{current_arg});
+                
+                // NOTE: In the real parser, here is where you would RECURSE
+                // return parseArgs(sub_definition, ...);
+                
+            } else {
+                std.debug.print("Això no és una commanda: {s}\n", .{current_arg});
+            }
         }
-
-        
     }
-
-
+    
+    // mock return until now
+    const result: ReArgs = undefined; 
+    return result;
 }
 // ULL aquí he posat anyerror mentre no reescric la funció per anar amb commands i que hi puguin haver-hi llistes buides :)
 pub fn old_parseArgs(allocator: Allocator, comptime args_def: anytype, args_iter: *Args.Iterator, stdout: *Io.Writer, stderr: *Io.Writer) anyerror!ArgsStruct(args_def) {

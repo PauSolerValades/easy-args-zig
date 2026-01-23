@@ -58,8 +58,8 @@ pub fn validateDefinition(comptime definition: anytype) void {
     if (hasCommands) {
         if (hasRequired) @compileError(".commands and .required are mutually exclusive in the same level");
         
-        if(hasOptional) validateOptional(definition);
-        if(hasFlags) validateFlags(definition);
+        if (hasOptional) validateSubfield(definition, .optarg);
+        if (hasFlags) validateSubfield(definition, .flag);
 
         const commands = definition.commands;
         const command_typeinfo = @typeInfo(@TypeOf(commands));
@@ -69,9 +69,8 @@ pub fn validateDefinition(comptime definition: anytype) void {
             validateDefinition(@field(definition.commands, field.name));
         }
     } else {
-       
-        validateSubfield(definition, .arg);
-
+        // despite being mutually exclusive you might have two subcomands and none requried 
+        if (hasRequired) validateSubfield(definition, .arg);
         if (hasOptional) validateSubfield(definition, .optarg);
         if (hasFlags) validateSubfield(definition, .flag);
     }
