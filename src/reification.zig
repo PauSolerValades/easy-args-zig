@@ -133,7 +133,7 @@ pub fn ArgsStruct(comptime definition: anytype) type {
     if (len_cmd > 0) {
         const CommandUnion = GenerateCommandUnion(definition.commands);
         
-        names[i] = "command"; 
+        names[i] = "cmd"; 
         types[i] = CommandUnion;
         
         attrs[i] = .{

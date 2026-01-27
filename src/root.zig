@@ -76,7 +76,7 @@ pub fn parseArgs(comptime definition: anytype, args: []const[]const u8, stdout: 
             const CommandUnion = comptime find_cmd: {
                 const fields = @typeInfo(ReArgs).@"struct".fields;
                 for (fields) |f| {
-                    if (std.mem.eql(u8, f.name, "command")) {
+                    if (std.mem.eql(u8, f.name, "cmd")) {
                         break :find_cmd f.type;
                     }
                 }
@@ -95,7 +95,7 @@ pub fn parseArgs(comptime definition: anytype, args: []const[]const u8, stdout: 
                         const def_subcmd = @field(definition.commands, name);
                         // we know this is a valid command, so we recursively parse the Args 
                         const parsedCmd = try parseArgs(def_subcmd, args[(i+1)..], stdout, stderr);
-                        result.command = @unionInit(CommandUnion, name, parsedCmd);              
+                        result.cmd = @unionInit(CommandUnion, name, parsedCmd);              
 
                         return result;
                     }
@@ -290,6 +290,7 @@ pub fn old_parseArgs(allocator: Allocator, comptime args_def: anytype, args_iter
     return result;
 }
 
+/// parses the values form the command line
 fn parseValue(comptime T: type, str: []const u8) !T {
     switch(@typeInfo(T)) {
         .int => return std.fmt.parseInt(T, str, 10),
@@ -376,7 +377,6 @@ const talloc = std.testing.allocator;
 const expect = std.testing.expect;
 const expectEqualStrings = std.testing.expectEqualStrings;
 
-
 test "parseValue successful" {
     const p1 = try parseValue(u32, "16");
     try expect(@as(u32, 16) == p1);
@@ -421,3 +421,142 @@ test "parseValue errors" {
     try expectError(error.InvalidArgument, parseValue(bool, "ture"));
 }
 
+const testing = std.testing;
+const tio = testing.io;
+var w = std.Io.File.stdout().writer(tio, &.{});
+const nullout = &w.interface;
+
+test "Normal parsing: required, flags, optional" {
+    const def = .{
+        .required = .{ Arg(u32, "count", "The number of items") },
+        .flags = .{ Flag("verbose", "v", "Enable verbose output") },
+        .optional = .{ OptArg([]const u8, "mode", "m", "default", "Operation mode") },
+    };
+
+    const args = &[_][]const u8{ "42", "-v", "--mode", "fast" };
+    const result = try parseArgs(def, args, nullout, nullout);
+
+    try testing.expectEqual(@as(u32, 42), result.count);
+    try testing.expectEqual(true, result.verbose);
+    try testing.expectEqualStrings("fast", result.mode);
+}
+
+test "Two subcommands with shared definition" {
+    const subdef = .{
+        .required = .{ Arg(u32, "id", "Resource ID") },
+        .flags = .{ Flag("force", "f", "Force operation") },
+        .optional = .{ OptArg(u32, "retry", "r", 1, "Number of retries") },
+    };
+
+    const def = .{
+        .commands = .{
+            .delete = subdef,
+            .update = subdef,
+        },
+    };
+
+    // "delete 100 --force"
+    {
+        const args = &[_][]const u8{ "delete", "100", "--force" };
+        const result = try parseArgs(def, args, nullout, nullout);
+
+        try testing.expect(result.cmd == .delete); 
+        // Verify values inside delete
+        try testing.expectEqual(@as(u32, 100), result.cmd.delete.id);
+        try testing.expectEqual(true, result.cmd.delete.force);
+        try testing.expectEqual(@as(u32, 1), result.cmd.delete.retry); // Default value
+    }
+
+    // Test Case B: "update 50 -r 5"
+    {
+        const args = &[_][]const u8{ "update", "50", "-r", "5" };
+        const result = try parseArgs(def, args, nullout, nullout);
+
+        try testing.expect(result.cmd == .update);
+        try testing.expectEqual(@as(u32, 50), result.cmd.update.id);
+        try testing.expectEqual(false, result.cmd.update.force);
+        try testing.expectEqual(@as(u32, 5), result.cmd.update.retry);
+    }
+}
+
+test "Subcommands with options/flags at multiple levels" {
+    const def = .{
+        .commands = .{
+            .commit = .{
+                .required = .{ Arg([]const u8, "msg", "Commit message") },
+                .flags = .{ Flag("amend", "a", "Amend previous commit") },
+            },
+        },
+        .flags = .{ Flag("git-dir", "g", "Use custom git dir") },
+        .optional = .{ OptArg([]const u8, "user", "u", "admin", "User name") },
+    };
+
+    // Input: "-g commit --amend 'fix bug'"
+    // This tests the parser's ability to handle parent flags (-g) mixed with subcommands
+    const args = &[_][]const u8{ "-g", "commit", "--amend", "fix bug" };
+    
+    const result = try parseArgs(def, args, nullout, nullout);
+
+    // 1. Check Base level
+    try testing.expectEqual(true, result.@"git-dir"); // -g
+    try testing.expectEqualStrings("admin", result.user); // default
+
+    // 2. Check Command selection
+    try testing.expect(result.cmd == .commit);
+
+    // 3. Check Subcommand level
+    try testing.expectEqual(true, result.cmd.commit.amend);
+    try testing.expectEqualStrings("fix bug", result.cmd.commit.msg);
+}
+
+test "4. Two nested subcommands" {
+    const def = .{
+        .commands = .{
+            .cloud = .{
+                .commands = .{
+                    .server = .{
+                        .commands = .{
+                            .create = .{
+                                .flags = .{ Flag("dry-run", "d", "Simulate") },
+                                .required = .{ Arg([]const u8, "name", "Server Name") },
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    // Input: "cloud server create --dry-run my-web-app"
+    const args = &[_][]const u8{ "cloud", "server", "create", "--dry-run", "my-web-app" };
+    
+    const result = try parseArgs(def, args, nullout, nullout);
+    // Accessing deeply nested unions requires checking the active tag at each level
+    // In a real app you might use `switch` or `if`, here we assert the path:
+    try testing.expect(result.cmd == .cloud);
+    try testing.expect(result.cmd.cloud.cmd == .server);
+    try testing.expect(result.cmd.cloud.cmd.server.cmd == .create);
+    
+    const final_cmd = result.cmd.cloud.cmd.server.cmd.create;
+    try testing.expectEqual(true, final_cmd.@"dry-run");
+    try testing.expectEqualStrings("my-web-app", final_cmd.name);
+}
+
+test "5. Help shown" {
+    const def = .{
+        .required = .{ Arg(u32, "num", "A number") },
+    };
+        
+    // Case A: "-h"
+    {
+        const args = &[_][]const u8{ "-h" };
+        // We expect parseArgs to return the error `HelpShown`
+        try testing.expectError(error.HelpShown, parseArgs(def, args, nullout, nullout));
+    }
+
+    // Case B: "help" (as a command/argument)
+    {
+        const args = &[_][]const u8{ "help" };
+        try testing.expectError(error.HelpShown, parseArgs(def, args, nullout, nullout));
+    }
+}
