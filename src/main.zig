@@ -122,8 +122,8 @@ pub fn main(init: std.process.Init) !void {
     //
     
     // const arguments = try eaz.parseArgs(allocator, definition, stdout, stderr);
-    var args = try init.minimal.args.iterateAllocator(init.arena.allocator()); // this is to make it multiplatform, for now
-    const arguments = eaz.parseArgs(definition, &args, stdout, stderr) catch |err| {
+    const args = try init.minimal.args.toSlice(init.arena.allocator()); // this is to make it multiplatform, for now
+    const arguments = eaz.parseArgs(definition, args, stdout, stderr) catch |err| {
         switch (err) {
             ParseErrors.HelpShown => try stdout.flush(),
             ParseErrors.UnexpectedArgument => {try stderr.writeAll("Error"); try stderr.flush(); },

@@ -6,8 +6,11 @@ const reification = @import("reification.zig");
 const Arg = reification.Arg;
 const OptArg = reification.OptArg;
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     
+    const args = try init.minimal.args.toSlice(init.arena.allocator()); // this is to make it multiplatform, for now
+    std.debug.print("{any}\n", .{@TypeOf(args)}); 
+
     const definition = .{
         .commands = .{
             .entry = .{ 

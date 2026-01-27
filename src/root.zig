@@ -15,55 +15,186 @@ pub const Flag = reification.Flag;
 pub const ParseErrors = error { HelpShown, MissingArgument, MissingValue, UnknownArgument, UnexpectedArgument };
 
 /// The function parses 
-pub fn parseArgs(comptime args_def: anytype, args_iter: *Args.Iterator, stdout: *Io.Writer, stderr: *Io.Writer) !ArgsStruct(args_def){
-    _ = stdout;
-    _ = stderr;
+/// Rules on the parsing:
+/// 1. Each level contains either a positional (required) or a command
+/// 2. Once a required argument is found, no other commands can be found. (./pgrm cmd1 req cmd2 -> does not compile)
+/// 3. All the required arguments must one after the other (eg ./prgm cmd1 r1, ..., rn, -f1,...,-fm, -o1, ..., -on). The order of required, flags, opt 
+///     can be interchangable, and opt/flags can be mixed toghether
+/// 4. No flags nor options can be between commands. If a flag/option is specific of a subcommand, add it before the last command.
+pub fn parseArgs(comptime definition: anytype, args: []const[]const u8, stdout: *Io.Writer, stderr: *Io.Writer) !ArgsStruct(definition){
 
-    // this will throw a compile error if not valid
-    validation.validateDefinition(args_def);
-
-    // create the reificated type 
-    const ReArgs: type = ArgsStruct(args_def);
+    if (std.mem.eql(u8, args[0], "help")) {
+        try printUsage(args_def, stdout);
+        return error.HelpShown;
+    }
     
-    if (@hasField(ReArgs, "command")) {
+    // this will throw a compile error if definition is not valid
+    validation.validateDefinition(definition);
+
+    // create the reificated struct, empty and ready to fill 
+    const ReArgs: type = ArgsStruct(definition);
+    var result: ReArgs = undefined;
+    
+    // as a standard, we check if a field exists in definition not in result : ReArgs
+    // that means @hasField(definition, ...) and NOT @hasField(result, ...)
+    const has_flags = @hasField(definition, "flags");
+    const has_optional = @hasField(definition, "optional");
+    // default flags to false
+    if (has_flags) {
+        inline for definition.flags |flag| {
+            // we have to fill the struct
+            // we are sure that definition IS the same as ReArgs struct
+            @field(result, flag.name) = false;
         
-        // get the type of the command field
-        // we ask Zig for the type info of our struct, get the fields, and search for "command"
-        const CommandUnion = comptime find_cmd: {
-            const fields = @typeInfo(ReArgs).@"struct".fields;
-            for (fields) |f| {
-                if (std.mem.eql(u8, f.name, "command")) {
-                    break :find_cmd f.type;
+        }
+    }
+
+    // default optionals to their values
+    if (has_optional) {
+        inline for (definition.optional) |opt| {
+            @field(result, opt.name) = o.default_value;
+        }
+    }
+   
+    var required_idx: usize = 0;
+    var parsed_flags: usize = 0;
+    var parsed_options: usize = 0;
+    var i: usize = 0;
+
+    while (args, 0..) : (i += 1) {
+        const current_arg = args[i];
+
+        if (@hasField(definition, "commands")) {
+            // get the type of the command field
+            // serach in the ReArgs because we are looking for the Union to get which commands
+            // have been already defined
+            // It could be done in definition.commands and iterate over there but that would waste a part
+            // of what has been done in ArgsStruct, where the Enum has been generated
+            const CommandUnion = comptime find_cmd: {
+                const fields = @typeInfo(ReArgs).@"struct".fields;
+                for (fields) |f| {
+                    if (std.mem.eql(u8, f.name, "command")) {
+                        break :find_cmd f.type;
+                    }
+                }
+                unreachable; // if @hasField(definition, "commands") this is unreachable
+            };
+
+            const CommandTag = std.meta.Tag(CommandUnion);
+
+            if (std.meta.stringToEnum(CommandTag, current_arg)) |command_tag| {
+                // we need to access the definition.commands.@value(current_arg) (eg: def.commands.entry)
+                // to do that we cannot use @field because current_arg is not comptime
+                // we have to generate all the code for the possible args with the inline else.
+                switch (command_tag) {
+                    inline else => |tag| {
+                        const name: []const u8 = @tagName(tag); // converts the enum into a string
+                        const def_subcmd = @field(definition.commands, name);
+                        // we know this is a valid command, so we recursively parse the Args 
+                        const parsedCmd = try parseArgs(def_subcmd, args[(i+1)..], stdout, stderr);
+                        result.command = @unionInit(CommandUnion, name, parsedCmd);              
+
+                        return result;
+                    }
+                }
+            } else {
+                return error.InvalidCommand;
+            }
+        }
+        
+        // PSEUDOCODE:
+        // 1. We know the argument is not a command. Now, is the value a positional or a flag/option?
+        // if (current_arg == flag or option), (according to has_element) parse the value, move on to next iteration
+        // else its a required: enter in a loop to parse exactly the required arguments.
+        // check how many flags/options are there, should add up to definition.flags.len. if they match we are done
+        // else raise error
+        if (std.mem.startWith(u8, current_arg, "-")) {
+            var matched = false;
+
+            if (has_flag) {
+                inline for (definition.flags) |flag| {
+                    const is_short = std.mem.eql(u8, current_arg, "--" ++ flag.field_name);
+                    const is_long = std.mem.eql(u8, current_arg, "-" ++ flag.field_short);
+
+                    if(is_short or is_long) {
+                        @field(result, flag.field_name) = true;
+                        parsed_flags += 1;
+                        matched = true;
+                        // nota, aquí un break literalment no fa res.
+                        // un inline ens està generant codi, ergo no és un for!
+                    }
                 }
             }
-            unreachable;
-        };
 
-        // get the Enum tags from that Union type
-        const CommandTag = std.meta.Tag(CommandUnion);
+            if (!matched and @hasField(definition, "optional")) {
+                inline for (definition.optional) |opt| {
+                    const is_short = std.mem.eql(u8, current_arg, "--" ++ opt.field_name);
+                    const is_long = std.mem.eql(u8, current_arg, "-" ++ opt.field_short);
 
-        // runtime parsing loop
-        // args_iter.next() returns ?[]const u8 (Optional), so we capture it with |arg|
-        while (args_iter.next()) |current_arg| {
-            
-            // stringToEnum returns an optional enum (e.g., .project or null).
-            // We capture it with |_| just to verify it's not null.
-            if (std.meta.stringToEnum(CommandTag, current_arg)) |_| {
-                std.debug.print("Això és una commanda: {s}\n", .{current_arg});
-                
-                // NOTE: In the real parser, here is where you would RECURSE
-                // return parseArgs(sub_definition, ...);
-                
-            } else {
-                std.debug.print("Això no és una commanda: {s}\n", .{current_arg});
+                    if(is_short or is_long) {
+                        if (i+1 >= args.len) {
+                            try stderr.print("Error: Option '{s}' does not have a value\n", .{opt.field_name});
+                            return error.MissingValue;
+                        }
+
+                        @field(result, opt.field_name) = try parseValue(opt.type_id, args[i+1]);
+                        i += 1; // skip the next iteration
+                        matched = true;
+                        // nota, aquí un break literalment no fa res.
+                        // un inline ens està generant codi, ergo no és un for!
+                    }
+                }
             }
+            
+            // if the flag/opt was actually found, next arg
+            if (matched) continue;
+
+            // here we could add a check like
+            // try stderr.print("Error: whateve")
+            // return error.UnknownArgument;
+        }
+    
+        // at this point this is uneccessary, validateDefinition guarantees that
+        // there is not a command and a required in the same level, but nevertheless..
+        if (@hasField(definition, "required")) {
+            if (required_idx >= definition.required.len) {
+                try stderr.print("Error: UnexpectedArgument '{s}'\n", .{current_arg});
+                return error.UnexpectedArgument;
+            }
+
+            // parse
+            inline for (definition.required, 0..) |req, j| {
+                if (j == required_idx) 
+                    @field(result, req.field_name) = try parseValue(req.type, current_arg); 
+            }
+        } else {
+            try stderr.print("Error: catastrofic failure of the validation function. Cry.");
+            return error.CatastroficStructure;
+        }
+        
+               
+        // some safety checks
+        //
+        if (has_flags and parsed_flags > definition.flags) {
+            try stderr.print("Error: Incorrect number of flags detected. Should be at most {d} but are {d}", .{definition.flags.len, parsed_flags});
+            return error.InvalidFlags;
+        }
+        
+        if (has_optional and parsed_options > definition.optional) {
+            try stderr.print("Error: Incorrect number of options detected. Should at most {d} but are {d}", .{definition.optional.len, parsed_options});
+            return error.InvalidOptions;
+        }
+
+        if (required_idx != definition.required.len) {
+            try stderr.print("Error: Incorrect number of required arguments detected. Should be {d} but are {d}.", .{definition.required.len, required_idx});
+            return error.UnexpertedArgument;
         }
     }
     
     // mock return until now
-    const result: ReArgs = undefined; 
     return result;
 }
+
 // ULL aquí he posat anyerror mentre no reescric la funció per anar amb commands i que hi puguin haver-hi llistes buides :)
 pub fn old_parseArgs(allocator: Allocator, comptime args_def: anytype, args_iter: *Args.Iterator, stdout: *Io.Writer, stderr: *Io.Writer) anyerror!ArgsStruct(args_def) {
     _ = allocator;
@@ -109,7 +240,7 @@ pub fn old_parseArgs(allocator: Allocator, comptime args_def: anytype, args_iter
 
 
     while (args_iter.next()) |arg_str| {
-        // must start with '-'
+        // must NOT start with '-'
         if (arg_str.len < 2 or arg_str[0] != '-') {
             try stderr.print("Error: Unexpected argument '{s}'\n", .{arg_str});
             return error.UnexpectedArgument;

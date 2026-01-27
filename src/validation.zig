@@ -50,7 +50,7 @@ pub fn validateDefinition(comptime definition: anytype) void {
             } else if (std.mem.eql(u8, field.name, "flags")) {
                 hasFlags = true;
             } else {
-                @compileError("Field '" ++ field.name ++ "' is invalid. Allowed: required, optional, flags, commands.");
+                @compileError("Field '" ++ field.name ++ "' is invalid. Allowed fields are: required/commands, optional, flags.");
             }
         }      
     }
