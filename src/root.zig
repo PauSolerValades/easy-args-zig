@@ -82,14 +82,26 @@ test "Normal parsing: required, flags, options" {
         .flags = .{ Flag("verbose", "v", "Enable verbose output") },
         .options = .{ Opt([]const u8, "mode", "m", "default", "Operation mode") },
     };
+    
+    {
+        const args = &[_][]const u8{ "pgm", "42", "-v", "--mode", "fast" };
+        const result = try parseArgs(ta, def, args, nullout, nullout);
 
-    const args = &[_][]const u8{ "pgm", "42", "-v", "--mode", "fast" };
-    const result = try parseArgs(ta, def, args, nullout, nullout);
-
-    try testing.expectEqual(@as(u32, 42), result.count);
-    try testing.expectEqual(true, result.verbose);
-    try testing.expectEqualStrings("fast", result.mode);
-}
+        try testing.expectEqual(@as(u32, 42), result.count);
+        try testing.expectEqual(true, result.verbose);
+        try testing.expectEqualStrings("fast", result.mode);
+    }
+    // {
+    //     // How the fuck do I create an Arg.Iterator?
+    //     const args = &[_][]const u8{ "pgm","-v", "--mode", "fast", "42" };
+    //     const result = try parseArgs(def, args, nullout, nullout);
+    //
+    //     try testing.expectEqual(@as(u32, 42), result.count);
+    //     try testing.expectEqual(true, result.verbose);
+    //     try testing.expectEqualStrings("fast", result.mode);
+    //
+    // }
+    }
 
 test "Normal parsing: 2 args, 2 flags, 2 options" {
     const def = .{

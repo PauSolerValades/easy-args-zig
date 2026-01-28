@@ -46,15 +46,15 @@ pub fn main(init: std.process.Init) !void {
     try stdout.print("Parsed with GNU:\n {any}\n", .{gnuargs});
 
     // // call the posix parser function. No allocator needed (not in windows tho)
-    // var iter = init.minimal.args.iterate(); 
-    // const posixargs = argz.parseArgsPosix(definition, &iter, stdout, stderr) catch |err| {
-    //     switch (err) {
-    //         ParseErrors.HelpShown => try stdout.flush(),
-    //         else => try stderr.flush(),
-    //     }
-    //     std.process.exit(0);
-    // };
-    //
+    var iter = init.minimal.args.iterate(); 
+    const posixargs = argz.parseArgsPosix(definition, &iter, stdout, stderr) catch |err| {
+        switch (err) {
+            ParseErrors.HelpShown => try stdout.flush(),
+            else => try stderr.flush(),
+        }
+        std.process.exit(0);
+    };
+
     // try stdout.print("Parsed with POSIX:\n {any}\n", .{posixargs});
     try stdout.flush();
 }
