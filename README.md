@@ -1,17 +1,54 @@
 # EazyArgs
 
-A simple, type-safe argument parser for Zig that leverages compile-time metaprogramming to generate a ready-to-use struct from the arguments definitions.
+A simple, type-safe, no boilerplate arg parser for Zig that leverages compile-time meta-programming to generate and fill an struct according to the provided definitions.
 Absolutely inspired by @gouwsxander [easy-args](https://github.com/gouwsxander/easy-args) C library.
 
 ## Main Idea
 
-In general, argument parsers require the user to write the struct to parse, and then implement the parsing logic. EazyArgs goes the other way around: the user defines the arguments of the program and the Zig compiler generates the struct for you.
 
-This idea offers the following features:
-+ **Simple, No Boilerplate**: Define your arguments once with their required type, those will become the struct fields. No need to write a separte string and then call a parser. 
-+ **Flexible**: Can specify required positional arguments, optional named arguments and boolean flags separately.
-+ **Help Generation**: generate help strings with just the provided description.
+EazyArgs leverages type [reification](https://en.wikipedia.org/wiki/Reification_(computer_science)) (create a type instead given a definition instead of explicitly writing it) to allow a much simpler and categorical definition. To parse your program arguments, you just need to define which `flags` the program accepts, which `options` and which `required` (positional) arguments are needed instead of defining the struct, as well as allowing to nest as many definitions as you want with `commands`.
 
++ **Simple, No Boilerplate**: Define your arguments once. The library generates the types, the validation, and the parser automatically.
++ **Categorical & Nested**: cleanly separate Flags, Options, and Positional arguments. Nest commands as deep as you need (e.g., git remote add origin).
++ [TODO] **Help Generation**: Usage strings are automatically generated from your definitions.
++ **Compile-time Specialized**: The validation happens at compile-time. The parser uses `inline` loops, meaning the resulting machine code is optimized specifically for your definition—no generic runtime overhead.
+
+## Simple Example
+
+Import the library and the argument structs.
+
+```zig
+const argz = @import("eazy_args");
+
+const Arg = argz.Arguments;
+const OptArg = argz.Option;
+const Flag = argz.Flag;
+```
+
+Then, declare an anonymous struct which has to contain the following elements: `.required`, `.optional` and `.flags`.
+
+```zig
+const definitions = .{
+    .required = .{
+      Arg(u32, "limit", "Limits are meant to be broken"),
+      Arg([]const u8, "username", "who are you dear?"),
+    },
+    .optional = .{
+      // type, field_name, short, default, description
+      OptArg(u32, "--break", "-b", 100, "Stop before the limit"),
+    },
+    .flag = .{
+      // default as false, type is bool
+      // field_name, short, description
+      Flag("--verbose", "-v", "Print a little, print a lot"),
+    }
+};
+```
+
+
+## Features
+
+To allow commands and subcommands, EazyArgs imposes the following rules in the definition
 ## Example Use
 
 Import the library and the argument structs.
