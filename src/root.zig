@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+const Args = std.process.Args;
 
 const reification = @import("reification.zig");
 const validation = @import("validation.zig");
@@ -17,16 +18,20 @@ pub const ParseErrors = error { HelpShown, MissingArgument, MissingValue, Unknow
 /// PUBLIC ENTRY POINT
 /// This is what the user calls with the raw OS arguments.
 /// It automatically skips argv[0] (the program name).
-pub fn parseArgs(comptime definition: anytype, args: []const []const u8, stdout: *Io.Writer, stderr: *Io.Writer) !ArgsStruct(definition) {
+pub fn parseArgs(gpa: Allocator, comptime definition: anytype, args: []const []const u8, stdout: *Io.Writer, stderr: *Io.Writer) !ArgsStruct(definition) {
     
     // if the user passes just the program name
     if (args.len == 1) {
         try printUsage(definition, stdout);
         return error.HelpShown;
     }
+    const consumed = try gpa.alloc(bool, args.len);
+    defer gpa.free(consumed);
+    @memset(consumed, false);
+    consumed[0] = true;
 
     // call the recursive version to adapt it
-    return parseArgsRecursive(definition, args[1..], stdout, stderr);
+    return parseArgsRecursive(definition, args, consumed, stdout, stderr);
 }
 
 /// The function parses 
@@ -36,13 +41,16 @@ pub fn parseArgs(comptime definition: anytype, args: []const []const u8, stdout:
 /// 3. All the required arguments must one after the other (eg ./prgm cmd1 r1, ..., rn, -f1,...,-fm, -o1, ..., -on). The order of required, flags, opt 
 ///     can be interchangable, and opt/flags can be mixed toghether
 /// 4. No flags nor options can be between commands. If a flag/option is specific of a subcommand, add it before the last command.
-fn parseArgsRecursive(comptime definition: anytype, args: []const[]const u8, stdout: *Io.Writer, stderr: *Io.Writer) anyerror!ArgsStruct(definition){
-    
-    if (std.mem.eql(u8, args[0], "help")) {
-        try printUsage(definition, stdout);
-        return error.HelpShown;
+fn parseArgsRecursive(comptime definition: anytype, args: []const[]const u8, consumed: []bool, stdout: *Io.Writer, stderr: *Io.Writer) anyerror!ArgsStruct(definition){
+   
+    // if some element is help -h or --help just print help
+    for (args, 0..) |arg, i| {
+        if (!consumed[i] and (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help"))) {
+            try printUsage(definition, stdout);
+            return error.HelpShown;
+        }
     }
-    
+       
     // this will throw a compile error if definition is not valid
     validation.validateDefinition(definition);
 
@@ -53,7 +61,6 @@ fn parseArgsRecursive(comptime definition: anytype, args: []const[]const u8, std
     // as a standard, we check if a field exists in definition not in result : ReArgs
     // that means @hasField(definition, ...) and NOT @hasField(result, ...)
     const Definition = @TypeOf(definition);
-    //const typeInfo = @typeInfo(T);
 
     const has_flags = @hasField(Definition, "flags");
     const has_optional = @hasField(Definition, "optional");
@@ -77,12 +84,291 @@ fn parseArgsRecursive(comptime definition: anytype, args: []const[]const u8, std
     var parsed_required: usize = 0;
     var parsed_flags: usize = 0;
     var parsed_options: usize = 0;
+
     var i: usize = 0;
-
     while (i < args.len) : (i += 1) {
-        const current_arg = args[i];
+        if (consumed[i]) continue;
 
-        if (@hasField(Definition, "commands")) {
+        const current_arg = args[i];
+        
+        if (std.mem.startsWith(u8, current_arg, "-")) {
+            var matched = false;
+           
+            const eq_index = std.mem.indexOf(u8, current_arg, "=");
+            
+            const arg_key = if (eq_index) |idx| current_arg[0..idx] else current_arg;
+            const arg_val_inline = if (eq_index) |idx| current_arg[idx+1..] else null;
+
+            if (has_flags) {
+                inline for (definition.flags) |flag| {
+                    const is_short = std.mem.eql(u8, arg_key, "--" ++ flag.field_name);
+                    const is_long = std.mem.eql(u8, arg_key, "-" ++ flag.field_short);
+
+                    if(is_short or is_long) {
+
+                        if (arg_val_inline != null) {
+                            try stderr.print("Error: a flag ({s}) cannot take values.\n", .{arg_key});
+                            return error.UnexpectedValue;
+                        }
+
+                        @field(result, flag.field_name) = true;
+                        parsed_flags += 1;
+                        matched = true;
+                    }
+                }
+            }
+
+            if (!matched and has_optional) {
+                inline for (definition.optional) |opt| {
+                    const is_short = std.mem.eql(u8, arg_key, "--" ++ opt.field_name);
+                    const is_long = std.mem.eql(u8, arg_key, "-" ++ opt.field_short);
+
+                    if(is_short or is_long) {
+                        // is an --opt=val 
+                        if (arg_val_inline) |val| {
+                            @field(result, opt.field_name) = try parseValue(opt.type_id, val);
+                        } else { // is an --opt val
+                            // serach the first non used argument 
+                            var next_idx = i+1;
+                            while (next_idx < args.len and consumed[next_idx]) : (next_idx += 1) {}
+                            
+                            if (next_idx >= args.len) {
+                                try stderr.print("Error: Option '{s}' does not have a value\n", .{opt.field_name});
+                                return error.MissingValue;
+                            }
+                       
+                            @field(result, opt.field_name) = try parseValue(opt.type_id, args[i+1]);
+                            consumed[next_idx] = true; 
+                        }
+                        
+                        parsed_options += 1;
+                        matched = true;
+                    }
+                }
+            }
+            
+            // if the flag/opt was actually found, next arg
+            if (matched) consumed[i] = true;
+
+            // here we could add a check like
+            // try stderr.print("Error: whateve")
+            // return error.UnknownArgument;
+        }
+    } 
+    if (@hasField(Definition, "commands")) {
+        // get the type of the command field
+        // serach in the ReArgs because we are looking for the Union to get which commands
+        // have been already defined
+        // It could be done in definition.commands and iterate over there but that would waste a part
+        // of what has been done in ArgsStruct, where the Enum has been generated
+        const CommandUnion = comptime find_cmd: {
+            const fields = @typeInfo(ReArgs).@"struct".fields;
+            for (fields) |f| {
+                if (std.mem.eql(u8, f.name, "cmd")) {
+                    break :find_cmd f.type;
+                }
+            }
+            unreachable; // if @hasField(definition, "commands") this is unreachable
+        };
+
+        const CommandTag = std.meta.Tag(CommandUnion);
+        i = 0;
+        while (i < args.len) : (i += 1) {
+            const current_arg = args[i];
+            if (std.meta.stringToEnum(CommandTag, current_arg)) |command_tag| {
+                consumed[i] = true;
+                // we need to access the definition.commands.@value(current_arg) (eg: def.commands.entry)
+                // to do that we cannot use @field because current_arg is not comptime
+                // we have to generate all the code for the possible args with the inline else.
+                switch (command_tag) {
+                    inline else => |tag| {
+                        const name: []const u8 = @tagName(tag); // converts the enum into a string
+                        const def_subcmd = @field(definition.commands, name);
+                        // we know this is a valid command, so we recursively parse the Args 
+                        const parsedCmd = try parseArgsRecursive(def_subcmd, args, consumed, stdout, stderr);
+                        result.cmd = @unionInit(CommandUnion, name, parsedCmd);              
+
+                        return result;
+                    }
+                }
+            }
+        }
+        
+    }
+
+    i = 0;
+    while (i < args.len) : (i += 1) {
+        if (consumed[i]) continue;
+        const current_arg = args[i];
+        
+        // safety check lol, a test failed
+        if (std.mem.startsWith(u8, current_arg, "-")) {
+            try stderr.print("Error: Unknown Argument {s}\n", .{current_arg});
+            return error.UnknownArgument;
+        }
+
+        if (@hasField(Definition, "required")) {
+            if (parsed_required >= definition.required.len) {
+                try stderr.print("Error: UnexpectedArgument '{s}'\n", .{current_arg});
+                return error.UnexpectedArgument;
+            }
+
+            // parse
+            inline for (definition.required, 0..) |req, j| {
+                if (j == parsed_required) 
+                    @field(result, req.field_name) = try parseValue(req.type_id, current_arg);
+                    parsed_required += 1;
+                    consumed[i] = true;
+            }
+        } else {
+            try stderr.writeAll("Error: catastrofic failure of the validation function. Cry.");
+            return error.CatastroficStructure;
+        }
+
+    }
+            
+            
+    // some safety checks
+    if (has_flags and parsed_flags > definition.flags.len) {
+        try stderr.print("Error: Incorrect number of flags detected. Should be at most {d} but are {d}", .{definition.flags.len, parsed_flags});
+        return error.InvalidFlags;
+    }
+    
+    if (has_optional and parsed_options > definition.optional.len) {
+        try stderr.print("Error: Incorrect number of options detected. Should at most {d} but are {d}", .{definition.optional.len, parsed_options});
+        return error.InvalidOptions;
+    }
+
+    if (@hasField(Definition, "required") and parsed_required != definition.required.len) {
+        try stderr.print("Error: Incorrect number of required arguments detected. Should be {d} but are {d}.", .{definition.required.len, parsed_required});
+        return error.UnexpertedArgument;
+    }
+    
+    // last parse should not have a command
+    if (@hasField(Definition, "commands")) {
+        try stderr.writeAll("Error: Expected a command.\n");
+        return error.MissingArgument;
+    }
+    
+    
+    return result;
+}
+
+pub fn parseArgsPosix(comptime definition: anytype, args: *Args.Iterator,stdout: *Io.Writer, stderr: *Io.Writer) anyerror!ArgsStruct(definition) {
+    if (!args.skip()) return error.MissingArgument;
+    
+    return parseArgsPosixRecursive(definition, args, stdout, stderr);
+}
+
+/// Implements a POSIX compilant parsing function of command line arguments. that is, for each level:
+/// 1. Parse flags.
+/// 2. Parse Options
+/// 3. Parse required arguments.
+/// If subcommands are provided, the options of that subcommand level must be provided before the positional argument.
+/// (eg, "git -v init "/path/to/file" -p", where -v is an application command
+/// a violation of that order will raise an error.
+fn parseArgsPosixRecursive(comptime definition: anytype, args: *Args.Iterator, stdout: *Io.Writer, stderr: *Io.Writer) anyerror!ArgsStruct(definition){
+    
+    // this will throw a compile error if definition is not valid
+    validation.validateDefinition(definition);
+
+    // create the reificated struct, empty and ready to fill 
+    const ReArgs: type = ArgsStruct(definition);
+    var result: ReArgs = undefined;
+    
+    // as a standard, we check if a field exists in definition not in result : ReArgs
+    // that means @hasField(definition, ...) and NOT @hasField(result, ...)
+    const Definition = @TypeOf(definition);
+    //const typeInfo = @typeInfo(T);
+
+    const has_flags = @hasField(Definition, "flags");
+    const has_optional = @hasField(Definition, "optional");
+    const has_required = @hasField(Definition, "required");
+    const has_commands = @hasField(Definition, "commands");
+
+    // default flags to false
+    if (has_flags) {
+        inline for (definition.flags) |flag| {
+            @field(result, flag.field_name) = false;
+        }
+    }
+
+    // default optionals to their values
+    if (has_optional) {
+        inline for (definition.optional) |opt| {
+            @field(result, opt.field_name) = opt.default_value;
+        }
+    }
+   
+    var parsed_required: usize = 0;
+    // var parsed_flags: usize = 0;
+    // var parsed_options: usize = 0;
+    var positional_started = false;
+
+    while (args.next()) |current_arg| {
+        
+        if (std.mem.eql(u8, current_arg, "-h") or std.mem.eql(u8, current_arg, "--help")) {
+            try printUsage(definition, stdout);
+            return error.HelpShown;
+        }
+        
+        var flag_detected = false;
+        if (!positional_started and std.mem.startsWith(u8, current_arg, "-")) {
+            
+            if (std.mem.eql(u8, current_arg, "--")) {
+                positional_started = true;
+                continue;
+            }
+
+
+            const eq_index = std.mem.indexOf(u8, current_arg, "=");
+            const arg_key = if (eq_index) |idx| current_arg[0..idx] else current_arg;
+            const arg_val_inline = if (eq_index) |idx| current_arg[idx+1..] else null;
+        
+            if (has_flags) {
+                inline for (definition.flags) |flag| {
+                    const is_short = std.mem.eql(u8, arg_key, "--" ++ flag.field_name);
+                    const is_long = std.mem.eql(u8, arg_key, "-" ++ flag.field_short);
+
+                    if(is_short or is_long) {
+
+                        if (arg_val_inline != null) {
+                            try stderr.print("Error: a flag ({s}) cannot take values.\n", .{arg_key});
+                            return error.UnexpectedValue;
+                        }
+
+                        @field(result, flag.field_name) = true;
+                        flag_detected = true;
+                    }
+                }
+            }
+
+           if (!flag_detected and has_optional) {
+                inline for (definition.optional) |opt| {
+                    const is_short = std.mem.eql(u8, arg_key, "--" ++ opt.field_name);
+                    const is_long = std.mem.eql(u8, arg_key, "-" ++ opt.field_short);
+
+                    if(is_short or is_long) {
+                        if (arg_val_inline) |val| { // is an --opt=val 
+                            @field(result, opt.field_name) = try parseValue(opt.type_id, val);
+                        } else { // is an --opt val
+                            const val = args.next(); 
+                            if (val) |v| {
+                                @field(result, opt.field_name) = try parseValue(opt.type_id, v);
+                            } else {
+                                try stderr.print("Error: null value on optional '{s}'\n", .{arg_key});
+                            }
+                        }
+                        
+                        flag_detected = true;
+                    }
+                }
+            }
+        }
+                     
+        if (flag_detected) continue;
+        
+        if (!positional_started and has_commands) {
             // get the type of the command field
             // serach in the ReArgs because we are looking for the Union to get which commands
             // have been already defined
@@ -109,7 +395,7 @@ fn parseArgsRecursive(comptime definition: anytype, args: []const[]const u8, std
                         const name: []const u8 = @tagName(tag); // converts the enum into a string
                         const def_subcmd = @field(definition.commands, name);
                         // we know this is a valid command, so we recursively parse the Args 
-                        const parsedCmd = try parseArgsRecursive(def_subcmd, args[(i+1)..], stdout, stderr);
+                        const parsedCmd = try parseArgsPosixRecursive(def_subcmd, args, stdout, stderr); // POINTER TO THE SAME ITERATOR
                         result.cmd = @unionInit(CommandUnion, name, parsedCmd);              
 
                         return result;
@@ -117,119 +403,49 @@ fn parseArgsRecursive(comptime definition: anytype, args: []const[]const u8, std
                 }
             } 
         }
-        
-        // PSEUDOCODE:
-        // 1. We know the argument is not a command. Now, is the value a positional or a flag/option?
-        // if (current_arg == flag or option), (according to has_element) parse the value, move on to next iteration
-        // else its a required: enter in a loop to parse exactly the required arguments.
-        // check how many flags/options are there, should add up to definition.flags.len. if they match we are done
-        // else raise error
-        if (std.mem.startsWith(u8, current_arg, "-")) {
-            var matched = false;
-           
-            // if some of the arguments is help just return
-            if (std.mem.eql(u8, current_arg, "-h") or std.mem.eql(u8, current_arg, "--help")) {
-                try printUsage(definition, stdout);
-                return error.HelpShown;
-            }
-           
-            const eq_index = std.mem.indexOf(u8, current_arg, "=");
-            
-            const arg_key = if (eq_index) |idx| current_arg[0..idx] else current_arg;
-            const arg_val_inline = if (eq_index) |idx| current_arg[idx+1..] else null;
-
-            if (has_flags) {
-                inline for (definition.flags) |flag| {
-                    const is_short = std.mem.eql(u8, arg_key, "--" ++ flag.field_name);
-                    const is_long = std.mem.eql(u8, arg_key, "-" ++ flag.field_short);
-
-                    if(is_short or is_long) {
-
-                        if (arg_val_inline != null) {
-                            try stderr.print("Error: a flag ({s}) cannot take values.\n", .{arg_key});
-                            return error.UnexpectedValue;
-                        }
-
-                        @field(result, flag.field_name) = true;
-                        parsed_flags += 1;
-                        matched = true;
-                        // nota, aquí un break literalment no fa res.
-                        // un inline ens està generant codi, ergo no és un for!
-                    }
-                }
-            }
-
-            if (!matched and @hasField(Definition, "optional")) {
-                inline for (definition.optional) |opt| {
-                    const is_short = std.mem.eql(u8, arg_key, "--" ++ opt.field_name);
-                    const is_long = std.mem.eql(u8, arg_key, "-" ++ opt.field_short);
-
-                    if(is_short or is_long) {
-                        // is an --opt=val 
-                        if (arg_val_inline) |val| {
-                            @field(result, opt.field_name) = try parseValue(opt.type_id, val);
-                        } else { // is an --opt val
-                           
-                            if (i+1 >= args.len) {
-                                try stderr.print("Error: Option '{s}' does not have a value\n", .{opt.field_name});
-                                return error.MissingValue;
-                            }
-                       
-                            @field(result, opt.field_name) = try parseValue(opt.type_id, args[i+1]);
-                            i += 1; 
-                            parsed_options += 1;
-                            // nota, aquí un break literalment no fa res.
-                            // un inline ens està generant codi, ergo no és un for!
-
-                        }
-                        
-                        matched = true;
-                    }
-                }
-            }
-            
-            // if the flag/opt was actually found, next arg
-            if (matched) continue;
-
-            // here we could add a check like
-            // try stderr.print("Error: whateve")
-            // return error.UnknownArgument;
-        }
     
-        // at this point this is uneccessary, validateDefinition guarantees that
-        // there is not a command and a required in the same level, but nevertheless..
-        if (@hasField(Definition, "required")) {
+        // positional arguments
+        positional_started = true;
+
+        if (std.mem.startsWith(u8, current_arg, "-")) {
+            try stderr.writeAll("Error: flag detected when required argument expected.\n");
+        }
+
+        if (has_required) {
             if (parsed_required >= definition.required.len) {
                 try stderr.print("Error: UnexpectedArgument '{s}'\n", .{current_arg});
                 return error.UnexpectedArgument;
             }
 
-            // parse
             inline for (definition.required, 0..) |req, j| {
                 if (j == parsed_required) 
                     @field(result, req.field_name) = try parseValue(req.type_id, current_arg);
                     parsed_required += 1;
             }
         } else {
-            try stderr.writeAll("Error: catastrofic failure of the validation function. Cry.");
-            return error.CatastroficStructure;
+            try stderr.print("Error: UnexpectedArgument '{s}'\n", .{current_arg});
+            return error.UnexpectedArgument;
         }
         
                
         // some safety checks
-        if (has_flags and parsed_flags > definition.flags.len) {
-            try stderr.print("Error: Incorrect number of flags detected. Should be at most {d} but are {d}", .{definition.flags.len, parsed_flags});
-            return error.InvalidFlags;
-        }
-        
-        if (has_optional and parsed_options > definition.optional.len) {
-            try stderr.print("Error: Incorrect number of options detected. Should at most {d} but are {d}", .{definition.optional.len, parsed_options});
-            return error.InvalidOptions;
-        }
+        // if (has_flags and parsed_flags > definition.flags.len) {
+        //     try stderr.print("Error: Incorrect number of flags detected. Should be at most {d} but are {d}", .{definition.flags.len, parsed_flags});
+        //     return error.InvalidFlags;
+        // }
+        //
+        // if (has_optional and parsed_options > definition.optional.len) {
+        //     try stderr.print("Error: Incorrect number of options detected. Should at most {d} but are {d}", .{definition.optional.len, parsed_options});
+        //     return error.InvalidOptions;
+        // }
 
-        if (parsed_required != definition.required.len) {
+        if (has_required and parsed_required != definition.required.len) {
             try stderr.print("Error: Incorrect number of required arguments detected. Should be {d} but are {d}.", .{definition.required.len, parsed_required});
             return error.UnexpertedArgument;
+        }
+
+        if (has_commands) {
+            try stderr.writeAll("Error: .command found at same level as .required.\n");
         }
     }
     

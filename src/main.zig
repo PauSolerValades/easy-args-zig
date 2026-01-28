@@ -80,11 +80,18 @@ pub fn main(init: std.process.Init) !void {
     };
     
     // convert the args into a slice
-    const args = try init.minimal.args.toSlice(init.arena.allocator()); 
-    for (args) |item| {
-        std.debug.print("{s}\n", .{item});
-    }
-    const arguments = argz.parseArgs(gitu_def, args, stdout, stderr) catch |err| {
+    // const args = try init.minimal.args.toSlice(init.arena.allocator()); 
+    // const arguments = argz.parseArgs(init.gpa, gitu_def, args, stdout, stderr) catch |err| {
+    //     switch (err) {
+    //         ParseErrors.HelpShown => try stdout.flush(),
+    //         else => try stderr.flush(),
+    //     }    
+    //     std.process.exit(0);
+    // };
+    
+    // also, you can do it strict posix
+    var iter = init.minimal.args.iterate(); 
+    const arguments = argz.parseArgsPosix(gitu_def, &iter, stdout, stderr) catch |err| {
         switch (err) {
             ParseErrors.HelpShown => try stdout.flush(),
             else => try stderr.flush(),
@@ -98,30 +105,30 @@ pub fn main(init: std.process.Init) !void {
     // Switch on the Union
     switch (arguments.cmd) {
         .init => |cmd| {
-            try stdout.print(">> COMMAND: INIT\n", .{});
-            try stdout.print("   Path: {s}\n   Bare: {}\n", .{cmd.path, cmd.bare});
+            try stdout.print("COMMAND: INIT\n", .{});
+            try stdout.print("Path: {s}\n   Bare: {}\n", .{cmd.path, cmd.bare});
             try inspectType(@TypeOf(cmd), "Init Subcommand", stdout);
         },
         .commit => |cmd| {
-            try stdout.print(">> COMMAND: COMMIT\n", .{});
-            try stdout.print("   Msg: {s}\n   Amend: {}\n", .{cmd.message, cmd.amend});
+            try stdout.print("COMMAND: COMMIT\n", .{});
+            try stdout.print("Msg: {s}\n   Amend: {}\n", .{cmd.message, cmd.amend});
             
             try inspectType(@TypeOf(cmd), "Commit Subcommand", stdout);
         },
         .remote => |remote_wrapper| {
-            try stdout.print(">> COMMAND: REMOTE\n", .{});
+            try stdout.print("COMMAND: REMOTE\n", .{});
             
             switch (remote_wrapper.cmd) {
                 .add => |cmd| {
-                    try stdout.print("   >> SUBCOMMAND: ADD\n", .{});
-                    try stdout.print("      Name:  {s}\n      URL:   {s}\n      Track: {s}\n", 
+                    try stdout.print("\tSUBCOMMAND: ADD\n", .{});
+                    try stdout.print("\tName:  {s}\n\tURL:\t{s}\n\tTrack: {s}\n", 
                         .{cmd.name, cmd.url, cmd.track});
                     
                     try inspectType(@TypeOf(cmd), "Remote Add Subcommand", stdout);
                 },
                 .show => |cmd| {
-                    try stdout.print("   >> SUBCOMMAND: SHOW\n", .{});
-                    try stdout.print("      Name: {s}\n", .{cmd.name});
+                    try stdout.print("\tSUBCOMMAND: SHOW\n", .{});
+                    try stdout.print("\tName: {s}\n", .{cmd.name});
                     
                     try inspectType(@TypeOf(cmd), "Remote Show Subcommand", stdout);
                 },
