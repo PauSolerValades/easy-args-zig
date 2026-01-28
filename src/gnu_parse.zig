@@ -34,7 +34,7 @@ pub fn parseArgsRecursive(comptime definition: anytype, args: []const[]const u8,
     const Definition = @TypeOf(definition);
 
     const has_flags = @hasField(Definition, "flags");
-    const has_optional = @hasField(Definition, "optional");
+    const has_options = @hasField(Definition, "options");
     // default flags to false
     if (has_flags) {
         inline for (definition.flags) |flag| {
@@ -45,9 +45,9 @@ pub fn parseArgsRecursive(comptime definition: anytype, args: []const[]const u8,
         }
     }
 
-    // default optionals to their values
-    if (has_optional) {
-        inline for (definition.optional) |opt| {
+    // default optionss to their values
+    if (has_options) {
+        inline for (definition.options) |opt| {
             @field(result, opt.field_name) = opt.default_value;
         }
     }
@@ -89,8 +89,8 @@ pub fn parseArgsRecursive(comptime definition: anytype, args: []const[]const u8,
                 }
             }
 
-            if (!matched and has_optional) {
-                inline for (definition.optional) |opt| {
+            if (!matched and has_options) {
+                inline for (definition.options) |opt| {
                     const is_short = std.mem.eql(u8, arg_key, "--" ++ opt.field_name);
                     const is_long = std.mem.eql(u8, arg_key, "-" ++ opt.field_short);
 
@@ -205,8 +205,8 @@ pub fn parseArgsRecursive(comptime definition: anytype, args: []const[]const u8,
         return error.InvalidFlags;
     }
     
-    if (has_optional and parsed_options > definition.optional.len) {
-        try stderr.print("Error: Incorrect number of options detected. Should at most {d} but are {d}", .{definition.optional.len, parsed_options});
+    if (has_options and parsed_options > definition.options.len) {
+        try stderr.print("Error: Incorrect number of options detected. Should at most {d} but are {d}", .{definition.options.len, parsed_options});
         return error.InvalidOptions;
     }
 

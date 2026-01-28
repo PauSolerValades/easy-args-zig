@@ -4,8 +4,8 @@ const Allocator = std.mem.Allocator;
 
 const argz = @import("eazy_args");
 
-const Arg = argz.Arg;
-const Opt = argz.Opt;
+const Arg = argz.Argument;
+const Opt = argz.Option;
 const Flag = argz.Flag;
 const ParseErrors = argz.ParseErrors;
 
@@ -23,7 +23,7 @@ pub fn main(init: std.process.Init) !void {
     const gitu_def = .{
         // set global arguments for the whole program
         .flags = .{ Flag("verbose", "v", "Enable verbose logging") },
-        .optional = .{ Opt([]const u8, "config", "c", "~/.gituconfig", "Path to config file") },
+        .options = .{ Opt([]const u8, "config", "c", "~/.gituconfig", "Path to config file") },
 
         .commands = .{
             .init = .{ // simple command with 1 positional argument
@@ -31,7 +31,7 @@ pub fn main(init: std.process.Init) !void {
                 .flags = .{ Flag("bare", "b", "Create a bare repository") },
             },
             .commit = .{ // just options and flags
-                .optional = .{ Opt([]const u8, "message", "m", "Default Message", "Commit message") },
+                .options = .{ Opt([]const u8, "message", "m", "Default Message", "Commit message") },
                 .flags = .{ Flag("amend", "a", "Amend the previous commit") },
             },
             .remote = .{ 
@@ -41,7 +41,7 @@ pub fn main(init: std.process.Init) !void {
                             Arg([]const u8, "name", "Remote name (e.g. origin)"),
                             Arg([]const u8, "url", "Remote URL"),
                         },
-                        .optional = .{ Opt([]const u8, "track", "t", "master", "Branch to track") },
+                        .options = .{ Opt([]const u8, "track", "t", "master", "Branch to track") },
                     },
                     .show = .{
                         .required = .{ Arg([]const u8, "name", "Remote name to inspect") },

@@ -1,19 +1,26 @@
 const std = @import("std");
 const Type = std.builtin.Type;
 
+const structs = @import("struct");
+
+const Arg = structs.Argument; 
+const Opt = structs.Option;
+const Flag = structs.Flag;
+
+
 const validation = @import("validation.zig");
 
 /// Creates a struct (reification) according to the definition description. 
 /// definition is an tuple containing tuples with the following four possible names 
 /// - .required: contains Arg structs. Will be created as a struct field with type T.
-/// - .optional: contains OptArg structs. Will be created as a struct field with type ?T. 
+/// - .options: contains OptArg structs. Will be created as a struct field with type ?T. 
 /// - .flags: contains Flag structs. Will be created as a struct field with type bool (false by default)
-/// - .commands: contains tuples named as the command option, which contain a ".required", ".optional", ".flags". Will be created as a union called "cmd", which will have all the labels as option
+/// - .commands: contains tuples named as the command option, which contain a ".required", ".options", ".flags". Will be created as a union called "cmd", which will have all the labels as option
 pub fn Reify(comptime definition: anytype) type {
     
     const definition_type = @TypeOf(definition);
     const len_req = if (@hasField(definition_type, "required")) definition.required.len else 0;
-    const len_opt = if (@hasField(definition_type, "optional")) definition.optional.len else 0;
+    const len_opt = if (@hasField(definition_type, "options")) definition.options.len else 0;
     const len_flg = if (@hasField(definition_type, "flags")) definition.flags.len else 0;
     const arg_len = len_req + len_opt + len_flg;
    
@@ -43,9 +50,9 @@ pub fn Reify(comptime definition: anytype) type {
     }
     
 
-    // fill optional arguments
+    // fill options arguments
     if (len_opt > 0) {
-        inline for (definition.optional) |arg| {
+        inline for (definition.options) |arg| {
             names[i] = arg.field_name;
             types[i] = arg.type_id;
             

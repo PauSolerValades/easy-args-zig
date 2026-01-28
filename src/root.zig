@@ -12,8 +12,8 @@ const parse = @import("parse.zig");
 
 // make the structs public to access them from main
 pub const Reify = reification.Reify;
-pub const Arg = structs.Arg; 
-pub const Opt = structs.Opt;
+pub const Argument = structs.Argument; 
+pub const Option = structs.Option;
 pub const Flag = structs.Flag;
 pub const ParseErrors = parse.ParseErrors;
 
@@ -71,11 +71,15 @@ const tio = testing.io;
 var w = std.Io.File.stdout().writer(tio, &.{});
 const nullout = &w.interface;
 
-test "Normal parsing: required, flags, optional" {
+const Arg = structs.Argument; 
+const Opt = structs.Option;
+
+
+test "Normal parsing: required, flags, options" {
     const def = .{
         .required = .{ Arg(u32, "count", "The number of items") },
         .flags = .{ Flag("verbose", "v", "Enable verbose output") },
-        .optional = .{ Opt([]const u8, "mode", "m", "default", "Operation mode") },
+        .options = .{ Opt([]const u8, "mode", "m", "default", "Operation mode") },
     };
 
     const args = &[_][]const u8{ "pgm", "42", "-v", "--mode", "fast" };
@@ -90,7 +94,7 @@ test "Two subcommands with shared definition" {
     const subdef = .{
         .required = .{ Arg(u32, "id", "Resource ID") },
         .flags = .{ Flag("force", "f", "Force operation") },
-        .optional = .{ Opt(u32, "retry", "r", 1, "Number of retries") },
+        .options = .{ Opt(u32, "retry", "r", 1, "Number of retries") },
     };
 
     const def = .{
@@ -134,7 +138,7 @@ test "Subcommands with options/flags at multiple levels" {
             },
         },
         .flags = .{ Flag("git-dir", "g", "Use custom git dir") },
-        .optional = .{ Opt([]const u8, "user", "u", "admin", "User name") },
+        .options = .{ Opt([]const u8, "user", "u", "admin", "User name") },
     };
 
     const args = &[_][]const u8{ "pgm","-g", "commit", "--amend", "fix bug" };
@@ -214,7 +218,7 @@ test "Help shown" {
 test "Mixed assignment styles (= vs space)" {
     const def = .{
         .required = .{ Arg(u32, "id", "Resource ID") },
-        .optional = .{
+        .options = .{
             Opt([]const u8, "mode", "m", "default", "Operation mode"),
             Opt(u32, "count", "c", 1, "Item count"),
         },

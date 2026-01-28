@@ -28,7 +28,7 @@ pub fn parseArgsPosixRecursive(comptime definition: anytype, args: *Args.Iterato
     //const typeInfo = @typeInfo(T);
 
     const has_flags = @hasField(Definition, "flags");
-    const has_optional = @hasField(Definition, "optional");
+    const has_options = @hasField(Definition, "options");
     const has_required = @hasField(Definition, "required");
     const has_commands = @hasField(Definition, "commands");
 
@@ -39,9 +39,9 @@ pub fn parseArgsPosixRecursive(comptime definition: anytype, args: *Args.Iterato
         }
     }
 
-    // default optionals to their values
-    if (has_optional) {
-        inline for (definition.optional) |opt| {
+    // default optionss to their values
+    if (has_options) {
+        inline for (definition.options) |opt| {
             @field(result, opt.field_name) = opt.default_value;
         }
     }
@@ -87,8 +87,8 @@ pub fn parseArgsPosixRecursive(comptime definition: anytype, args: *Args.Iterato
                 }
             }
 
-           if (!flag_detected and has_optional) {
-                inline for (definition.optional) |opt| {
+           if (!flag_detected and has_options) {
+                inline for (definition.options) |opt| {
                     const is_short = std.mem.eql(u8, arg_key, "--" ++ opt.field_name);
                     const is_long = std.mem.eql(u8, arg_key, "-" ++ opt.field_short);
 
@@ -100,7 +100,7 @@ pub fn parseArgsPosixRecursive(comptime definition: anytype, args: *Args.Iterato
                             if (val) |v| {
                                 @field(result, opt.field_name) = try parse.parseValue(opt.type_id, v);
                             } else {
-                                try stderr.print("Error: null value on optional '{s}'\n", .{arg_key});
+                                try stderr.print("Error: null value on options '{s}'\n", .{arg_key});
                             }
                         }
                         
@@ -178,8 +178,8 @@ pub fn parseArgsPosixRecursive(comptime definition: anytype, args: *Args.Iterato
         //     return error.InvalidFlags;
         // }
         //
-        // if (has_optional and parsed_options > definition.optional.len) {
-        //     try stderr.print("Error: Incorrect number of options detected. Should at most {d} but are {d}", .{definition.optional.len, parsed_options});
+        // if (has_options and parsed_options > definition.options.len) {
+        //     try stderr.print("Error: Incorrect number of options detected. Should at most {d} but are {d}", .{definition.options.len, parsed_options});
         //     return error.InvalidOptions;
         // }
 

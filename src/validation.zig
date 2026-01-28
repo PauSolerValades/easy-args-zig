@@ -19,7 +19,7 @@ pub fn validateReservedKeywords(comptime name: []const u8, comptime short: ?[]co
 /// 1. There cannot be a .commands and a required at the same level.
 /// 2. You can nest any commands within each other as long as there is no .required.
 ///     Up to that point, a command must not appear.
-/// 3. Flags and Optionals are optionals
+/// 3. Flags and optionss are optionss
 pub fn validateDefinition(comptime definition: anytype) void {
     const T = @TypeOf(definition);
     const typeInfo = @typeInfo(T);
@@ -30,7 +30,7 @@ pub fn validateDefinition(comptime definition: anytype) void {
     
     comptime var hasRequired = false;
     comptime var hasCommands = false;
-    comptime var hasOptional = false;
+    comptime var hasOptions = false;
     comptime var hasFlags    = false;
     
     // the definition validation must happen on compile time
@@ -40,12 +40,12 @@ pub fn validateDefinition(comptime definition: anytype) void {
                 hasRequired = true;
             } else if (std.mem.eql(u8, field.name, "commands")) {
                 hasCommands = true;
-            } else if (std.mem.eql(u8, field.name, "optional")) {
-                hasOptional = true;
+            } else if (std.mem.eql(u8, field.name, "options")) {
+                hasOptions = true;
             } else if (std.mem.eql(u8, field.name, "flags")) {
                 hasFlags = true;
             } else {
-                @compileError("Field '" ++ field.name ++ "' is invalid. Allowed fields are: required/commands, optional, flags.");
+                @compileError("Field '" ++ field.name ++ "' is invalid. Allowed fields are: required/commands, options, flags.");
             }
         }      
     }
@@ -53,7 +53,7 @@ pub fn validateDefinition(comptime definition: anytype) void {
     if (hasCommands) {
         if (hasRequired) @compileError(".commands and .required are mutually exclusive in the same level");
         
-        if (hasOptional) validateSubfield(definition, .optarg);
+        if (hasOptions) validateSubfield(definition, .option);
         if (hasFlags) validateSubfield(definition, .flag);
 
         const commands = definition.commands;
@@ -65,16 +65,16 @@ pub fn validateDefinition(comptime definition: anytype) void {
         }
     } else {
         // despite being mutually exclusive you might have two subcomands and none requried 
-        if (hasRequired) validateSubfield(definition, .arg);
-        if (hasOptional) validateSubfield(definition, .optarg);
+        if (hasRequired) validateSubfield(definition, .argument);
+        if (hasOptions) validateSubfield(definition, .option);
         if (hasFlags) validateSubfield(definition, .flag);
     }
 }
 
 fn validateSubfield(comptime definition: anytype, comptime kind: ArgKind) void {
     const name = switch(kind) {
-        .arg => "required",
-        .optarg => "optional",
+        .argument => "required",
+        .option => "options",
         .flag => "flags",
     };
 
@@ -97,7 +97,7 @@ test "normal definition" {
         const definition = .{
             .required = .{ Arg(u32, "a", "aaa") },
             .flags = .{ Flag("verbose", "v", "Print Verbose") },
-            .optional = .{ Opt(u32, "bbbbb", "b", 1, "lots of b") },
+            .options = .{ Opt(u32, "bbbbb", "b", 1, "lots of b") },
         };
 
         validateDefinition(definition); // this has to just not compile 
@@ -106,7 +106,7 @@ test "normal definition" {
         const subdef = .{
             .required = .{ Arg(u32, "a", "aaa") },
             .flags = .{ Flag("verbose", "v", "Print Verbose") },
-            .optional = .{ Opt(u32, "bbbbb", "b", 1, "lots of b") },
+            .options = .{ Opt(u32, "bbbbb", "b", 1, "lots of b") },
         };
 
         const definition = .{
@@ -122,7 +122,7 @@ test "normal definition" {
         const subdef = .{
             .required = .{ Arg(u32, "a", "aaa") },
             .flags = .{ Flag("verbose", "v", "Print Verbose") },
-            .optional = .{ Opt(u32, "bbbbb", "b", 1, "lots of b") },
+            .options = .{ Opt(u32, "bbbbb", "b", 1, "lots of b") },
         };
 
         const definition = .{
@@ -145,7 +145,7 @@ test "normal definition" {
     //     const subdef = .{
     //         .required = .{ Arg(u32, "a", "aaa") },
     //         .flags = .{ Flag("verbose", "v", "Print Verbose") },
-    //         .optional = .{ Opt(u32, "bbbbb", "b", 1, "lots of b") },
+    //         .options = .{ Opt(u32, "bbbbb", "b", 1, "lots of b") },
     //     };
     //
     //     const definition = .{
@@ -169,7 +169,7 @@ test "normal definition" {
     //     const subdef = .{
     //         .required = .{ Arg(u32, "a", "aaa") },
     //         .flags = .{ Flag("verbose", "v", "Print Verbose") },
-    //         .optional = .{ Opt(u32, "bbbbb", "b", 1, "lots of b") },
+    //         .options = .{ Opt(u32, "bbbbb", "b", 1, "lots of b") },
     //     };
     //
     //     const definition = .{
@@ -181,7 +181,7 @@ test "normal definition" {
     //                     },
     //                     .flags = .{ Flag("aaaaaa", "a", "aaa")},
     //                 },
-    //                 .optional = .{ Opt(u64, "zzzzz", "z", 1, "lots of z") },
+    //                 .options = .{ Opt(u64, "zzzzz", "z", 1, "lots of z") },
     //             },
     //             .cmd2 = subdef,
     //         },
